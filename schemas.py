@@ -17,3 +17,8 @@ class AIPCreate(BaseModel):
     transfer_id: str
     originais: List[ArquivoOriginalCreate]
     preservados: List[ArquivoPreservacaoCreate] = [] 
+
+class LocationResponse(BaseModel):
+    bucket: str
+    path: str
+    filename: str
