@@ -22,3 +22,11 @@ class LocationResponse(BaseModel):
     bucket: str
     path: str
     filename: str
+
+class FileToDelete(BaseModel):
+    bucket: str
+    path: str
+
+class LogicalDeleteResponse(BaseModel):
+    message: str
+    filesToDelete: List[FileToDelete]

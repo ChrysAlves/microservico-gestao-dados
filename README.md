@@ -56,7 +56,7 @@ O **Microsserviço de Gestão de Dados** é o "Arquivo Central de Informações"
   "originais": [
     {
       "nome": "documento.pdf",
-      "caminho_minio": "originals/path/documento.pdf",
+      "caminho_minio": "originais/path/documento.pdf",
       "checksum": "sha256-hash",
       "formato": "application/pdf"
     }
@@ -64,7 +64,7 @@ O **Microsserviço de Gestão de Dados** é o "Arquivo Central de Informações"
   "preservados": [
     {
       "nome": "documento_preservado.pdf",
-      "caminho_minio": "preservation/path/documento_preservado.pdf",
+      "caminho_minio": "preservacoes/path/documento_preservado.pdf",
       "checksum": "sha256-hash",
       "formato": "application/pdf"
     }
@@ -85,8 +85,8 @@ O **Microsserviço de Gestão de Dados** é o "Arquivo Central de Informações"
 **Resposta de Localização**:
 ```json
 {
-  "bucket": "preservation",
-  "path": "preservation/path/documento_preservado.pdf",
+  "bucket": "preservacoes",
+  "path": "preservacoes/path/documento_preservado.pdf",
   "filename": "documento_preservado.pdf"
 }
 ```
@@ -134,8 +134,8 @@ Retorna a localização de um arquivo para download (chamado pelo Mapoteca).
 **Status Code**: 200 OK | 404 Not Found
 
 **Lógica de Priorização**:
-1. Primeiro, busca arquivos no bucket `preservation`
-2. Se não encontrar, busca no bucket `originals`
+1. Primeiro, busca arquivos no bucket `preservacoes`
+2. Se não encontrar, busca no bucket `originais`
 3. Retorna erro 404 se nenhum arquivo for encontrado
 
 ### DELETE /aips/{transfer_id}

@@ -1,4 +1,3 @@
-# models.py (CORRIGIDO)
 
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship, declarative_base
@@ -11,10 +10,11 @@ class AIP(Base):
     id = Column(Integer, primary_key=True, index=True)
     transfer_id = Column(String, unique=True, index=True, nullable=False)
     creation_date = Column(DateTime, default=datetime.utcnow)
+    deleted_at = Column(DateTime, nullable=True, default=None) 
+
     
     arquivos_originais = relationship("ArquivoOriginal", back_populates="aip")
     arquivos_preservacao = relationship("ArquivoPreservacao", back_populates="aip")
-    # A relação com 'eventos' foi removida daqui
 
 class ArquivoOriginal(Base):
     __tablename__ = "arquivos_originais"

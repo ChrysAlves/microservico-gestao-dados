@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker, Session
 import models
 import schemas
 from models import Base
+from datetime import datetime 
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:password@preservacao_db:5432/preservacao_db")
 
@@ -57,12 +58,43 @@ def criar_registro_aip(payload: schemas.AIPCreate, db: Session = Depends(get_db)
     
 
 
+@app.post("/aips/{transfer_id}/logical-delete", response_model=schemas.LogicalDeleteResponse)
+def logical_delete_aip(transfer_id: str, db: Session = Depends(get_db)):
+    print(f"Recebido pedido de deleção lógica para o AIP com Transfer ID: {transfer_id}")
+
+    aip = db.query(models.AIP).filter(models.AIP.transfer_id == transfer_id, models.AIP.deleted_at == None).first()
+    
+    if not aip:
+        print(f"AIP com Transfer ID {transfer_id} não encontrado ou já deletado.")
+        raise HTTPException(status_code=404, detail="AIP não encontrado ou já marcado para deleção.")
+
+    files_to_delete = []
+    for arquivo in aip.arquivos_originais:
+        files_to_delete.append({"bucket": "originais", "path": arquivo.caminho_minio})
+    
+    for arquivo in aip.arquivos_preservacao:
+        files_to_delete.append({"bucket": "preservacoes", "path": arquivo.caminho_minio})
+    
+    print(f"Arquivos a serem deletados fisicamente: {len(files_to_delete)}")
+
+    aip.deleted_at = datetime.utcnow()
+    db.commit()
+    
+    print(f"AIP {transfer_id} marcado como deletado com sucesso.")
+
+    return {
+        "message": "Item marcado para deleção com sucesso.",
+        "filesToDelete": files_to_delete
+    }
+    
+
+
 @app.get("/aips/{transfer_id}/location", response_model=schemas.LocationResponse)
 def get_item_location(transfer_id: str, db: Session = Depends(get_db)):
     """
     Retorna a localização de um arquivo para download.
-    Prioriza o arquivo de preservação (bucket 'preservation').
-    Se não existir, retorna o original (bucket 'originals').
+    Prioriza o arquivo de preservação (bucket 'preservacoes').
+    Se não existir, retorna o original (bucket 'originais').
     """
     print(f"Buscando localização para o AIP com Transfer ID: {transfer_id}")
 
@@ -75,12 +107,12 @@ def get_item_location(transfer_id: str, db: Session = Depends(get_db)):
     
     bucket_name = ""
     if arquivo_para_baixar:
-        bucket_name = "preservation"
+        bucket_name = "preservacoes"
     else:
         print(f"Nenhum arquivo de preservação encontrado. Buscando arquivo original.")
         arquivo_para_baixar = db.query(models.ArquivoOriginal).filter(models.ArquivoOriginal.aip_id == aip.id).first()
         if arquivo_para_baixar:
-            bucket_name = "originals"
+            bucket_name = "originais"
 
     if not arquivo_para_baixar:
         print(f"Nenhum arquivo (preservação ou original) encontrado para o AIP {aip.id}.")
