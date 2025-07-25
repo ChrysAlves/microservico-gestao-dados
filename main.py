@@ -7,13 +7,14 @@ import schemas
 from models import Base
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:password@preservacao_db:5432/preservacao_db")
+
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 app = FastAPI(title="Microsserviço de Gestão de Dados")
 
 @app.on_event("startup")
 def on_startup():
-    print("Verificando e criando tabelas do banco de dados, se necessário...")
+    print("Verificando e criando tabelas do banco de dados, se necessario...") 
     Base.metadata.create_all(bind=engine)
     print("Tabelas prontas.")
 
@@ -30,14 +31,12 @@ def criar_registro_aip(payload: schemas.AIPCreate, db: Session = Depends(get_db)
     
     db_aip = models.AIP(transfer_id=payload.transfer_id)
     
-    # Itera sobre a lista de arquivos originais
     for arquivo_data in payload.originais:
         db_arquivo_original = models.ArquivoOriginal(
             aip=db_aip, **arquivo_data.model_dump()
         )
         db.add(db_arquivo_original)
 
-    # Itera sobre a lista de arquivos de preservação
     for arquivo_data in payload.preservados:
         db_arquivo_preservacao = models.ArquivoPreservacao(
             aip=db_aip, **arquivo_data.model_dump()
@@ -49,8 +48,48 @@ def criar_registro_aip(payload: schemas.AIPCreate, db: Session = Depends(get_db)
         db.commit()
         db.refresh(db_aip)
         print(f"--- AIP salvo com sucesso! ID: {db_aip.id} ---")
-        return {"message": "AIP registrado com sucesso!", "aip_id": db_aip.id}
+        return {"message": "AIP registrado com sucesso!", "aip_id": db_aip.id} # sem ç e ã
     except Exception as e:
         db.rollback()
         print(f"ERRO ao salvar AIP: {e}")
+
         raise HTTPException(status_code=500, detail="Erro interno ao salvar o AIP.")
+    
+
+
+@app.get("/aips/{transfer_id}/location", response_model=schemas.LocationResponse)
+def get_item_location(transfer_id: str, db: Session = Depends(get_db)):
+    """
+    Retorna a localização de um arquivo para download.
+    Prioriza o arquivo de preservação (bucket 'preservation').
+    Se não existir, retorna o original (bucket 'originals').
+    """
+    print(f"Buscando localização para o AIP com Transfer ID: {transfer_id}")
+
+    aip = db.query(models.AIP).filter(models.AIP.transfer_id == transfer_id).first()
+    if not aip:
+        print(f"AIP com Transfer ID {transfer_id} não encontrado.")
+        raise HTTPException(status_code=404, detail="AIP não encontrado")
+
+    arquivo_para_baixar = db.query(models.ArquivoPreservacao).filter(models.ArquivoPreservacao.aip_id == aip.id).first()
+    
+    bucket_name = ""
+    if arquivo_para_baixar:
+        bucket_name = "preservation"
+    else:
+        print(f"Nenhum arquivo de preservação encontrado. Buscando arquivo original.")
+        arquivo_para_baixar = db.query(models.ArquivoOriginal).filter(models.ArquivoOriginal.aip_id == aip.id).first()
+        if arquivo_para_baixar:
+            bucket_name = "originals"
+
+    if not arquivo_para_baixar:
+        print(f"Nenhum arquivo (preservação ou original) encontrado para o AIP {aip.id}.")
+        raise HTTPException(status_code=404, detail="Nenhum arquivo associado a este AIP foi encontrado")
+
+    print(f"Arquivo selecionado para download: {arquivo_para_baixar.nome} no bucket: {bucket_name}")
+
+    return schemas.LocationResponse(
+        bucket=bucket_name,
+        path=arquivo_para_baixar.caminho_minio,
+        filename=arquivo_para_baixar.nome
+    )
