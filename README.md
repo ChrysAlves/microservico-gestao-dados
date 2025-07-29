@@ -47,7 +47,7 @@ O **Microsserviço de Gestão de Dados** é o "Arquivo Central de Informações"
 
 **Endpoint**: `POST /aips/`
 
-**Função**: Após processar um SIP e criar o AIP, o microsserviço de processamento envia todos os metadados gerados para registro permanente.
+**Função**: Após processar um SIP e criar o AIP, o microsserviço de processamento envia todos os metadados gerados para registro permanente
 
 **Payload**:
 ```json
