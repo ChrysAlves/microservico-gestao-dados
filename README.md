@@ -1,194 +1,230 @@
-# Microsserviço de Gestão de Dados
+# Sistema de Gestão de Dados e Processamento
 
-## Visão Geral
+## Descrição
 
-O **Microsserviço de Gestão de Dados** é o "Arquivo Central de Informações" do sistema de preservação digital. Atua como o guardião de TODOS os metadados sobre SIPs, AIPs e DIPs, sendo a "fonte da verdade" para informações de preservação. Este serviço não interage diretamente com o Front-End - toda comunicação passa pelo Microsserviço Mapoteca, que atua como orquestrador central.
+Microsserviço para gestão de metadados e processamento de arquivos no sistema de preservação digital. Combina API REST síncrona e worker Redis assíncrono
 
-## Funcionalidades Principais
+Este serviço atua como o núcleo do sistema de preservação, recebendo arquivos através de filas Redis, processando-os (sanitização, cálculo de checksums, normalização para PDF/A), armazenando no MinIO e registrando todos os metadados no PostgreSQL. Também fornece uma API REST para consulta, renomeação e deleção lógica dos pacotes arquivísticos (AIPs), além de gerenciar uma estrutura hierárquica de pastas para organização dos documentos.
 
-### 1. Registro de AIPs
-- Recebe e armazena metadados de pacotes de informação arquivística
-- Gerencia informações de arquivos originais e preservados
-- Calcula e armazena checksums para integridade dos dados
-- Mantém histórico de criação e modificação
+## Tecnologias
 
-### 2. Consulta de Localização
-- Fornece informações de localização de arquivos para download
-- Prioriza arquivos de preservação sobre originais
-- Retorna metadados necessários para acesso aos arquivos no MinIO
+- Python/FastAPI
+- PostgreSQL
+- Redis
+- MinIO
+- unoconv
 
-## Arquitetura do Sistema
+## Arquitetura
 
 ```
-┌─────────────────┐    ┌──────────────────────┐    ┌─────────────────┐
-│   Front-End     │───▶│   Microsserviço      │◄───│   Microsserviço │
-│                 │    │     Mapoteca         │    │     MinIO       │
-└─────────────────┘    │  (Orquestrador)      │    │                 │
-                       └──────────────────────┘    └─────────────────┘
+┌──────────────┐      ┌────────────────────┐      ┌────────────────┐
+│  🌐 Cliente  │─────▶│   🏗️ Gestão Dados │◀────▶│ 📦 MinIO       │
+└──────────────┘      │   (FastAPI+Redis)  │      │   Storage      │
+                      └─────────┬──────────┘      └────────────────┘
                                 │
                                 ▼
-                       ┌──────────────────────┐
-                       │  Microsserviço de    │
-                       │  Gestão de Dados     │◄─── Microsserviço de
-                       │     (Este)           │     Processamento
-                       └──────────────────────┘
-                                │                           ▲
-                                ▼                           │
-                       ┌─────────────────┐    ┌─────────────────┐
-                       │   PostgreSQL    │    │   Microsserviço │
-                       │ (preservacao_db)│    │   de Ingestão   │
-                       └─────────────────┘    └─────────────────┘
+                      ┌────────────────────┐
+                      │ 🐘 PostgreSQL      │
+                      │   Database         │
+                      └────────────────────┘
 ```
 
-## Comunicação com Outros Microsserviços
+## Fluxo de Processamento
 
-### 1. Microsserviço de Processamento (Python)
-**Direção**: Processamento → Gestão de Dados
-
-**Endpoint**: `POST /aips/`
-
-**Função**: Após processar um SIP e criar o AIP, o microsserviço de processamento envia todos os metadados gerados para registro permanente
-
-**Payload**:
-```json
-{
-  "transfer_id": "unique-transfer-id",
-  "originais": [
-    {
-      "nome": "documento.pdf",
-      "caminho_minio": "originais/path/documento.pdf",
-      "checksum": "sha256-hash",
-      "formato": "application/pdf"
-    }
-  ],
-  "preservados": [
-    {
-      "nome": "documento_preservado.pdf",
-      "caminho_minio": "preservacoes/path/documento_preservado.pdf",
-      "checksum": "sha256-hash",
-      "formato": "application/pdf"
-    }
-  ]
-}
+```
+    🚀 INÍCIO
+       │
+       ▼
+┌─────────────────┐
+│ 📨 Recebe       │
+│ mensagem Redis  │
+└─────────┬───────┘
+          │
+          ▼
+     ❓ Válido?
+      ╱       ╲
+   Sim╱         ╲Não
+     ╱           ╲
+    ▼             ▼
+┌─────────────┐ ┌─────────────┐
+│ 🧹 Sanitiza │ │ ❌ Log erro │
+│  arquivos   │ │ e descarta  │
+└─────┬───────┘ └─────────────┘
+      │
+      ▼
+┌─────────────┐
+│ 🔐 Calcula  │
+│   SHA256    │
+└─────┬───────┘
+      │
+      ▼
+  📄 Normalizar?
+    ╱       ╲
+ Sim╱         ╲Não
+   ╱           ╲
+  ▼             ▼
+┌─────────────┐  │
+│ 🔄 Converte │  │
+│ para PDF/A  │  │
+└─────┬───────┘  │
+      │          │
+      ▼          ▼
+┌─────────────────┐
+│ ⬆️  Upload para │
+│     MinIO       │
+└─────────┬───────┘
+          │
+          ▼
+┌─────────────────┐
+│ 💾 Registra     │
+│ metadados no BD │
+└─────────┬───────┘
+          │
+          ▼
+       🏁 FIM
 ```
 
-### 2. Microsserviço Mapoteca (Orquestrador)
-**Direção**: Mapoteca ↔ Gestão de Dados
+## Fluxo de Renomeação de Pasta
 
-**Endpoints**:
-- `GET /aips/{transfer_id}/location` - Consulta localização para download
-- `DELETE /aips/{transfer_id}` - Deleção lógica (marca como deletado)
-- `PUT /aips/{transfer_id}/rename` - Renomeação de metadados
-
-**Função**: O Mapoteca consulta metadados para operações de download, deleção lógica e renomeação. É o único microsserviço que o Front-End acessa diretamente.
-
-**Resposta de Localização**:
-```json
-{
-  "bucket": "preservacoes",
-  "path": "preservacoes/path/documento_preservado.pdf",
-  "filename": "documento_preservado.pdf"
-}
+```
+    🚀 INÍCIO
+       │
+       ▼
+┌─────────────────┐
+│ 📝 Recebe novo  │
+│ nome da pasta   │
+└─────────┬───────┘
+          │
+          ▼
+   🔍 Pasta existe?
+      ╱       ╲
+   Não╱         ╲Sim
+     ╱           ╲
+    ▼             ▼
+┌─────────────┐ ┌─────────────────┐
+│ ❌ Retorna  │ │ 🔍 Nome já      │
+│   erro 404  │ │ existe no pai?  │
+└─────────────┘ └─────────┬───────┘
+                          │
+                          ▼
+                     ❓ Conflito?
+                      ╱       ╲
+                   Sim╱         ╲Não
+                     ╱           ╲
+                    ▼             ▼
+                ┌─────────────┐ ┌─────────────────┐
+                │ ❌ Retorna  │ │ 🔄 Atualiza     │
+                │   erro 409  │ │ caminhos MinIO  │
+                └─────────────┘ └─────────┬───────┘
+                                          │
+                                          ▼
+                                ┌─────────────────┐
+                                │ 💾 Salva novo   │
+                                │ nome no BD      │
+                                └─────────┬───────┘
+                                          │
+                                          ▼
+                                       🏁 FIM
 ```
 
-### 3. Microsserviço de Ingestão (TypeScript)
-**Direção**: Ingestão → Gestão de Dados (via Processamento)
+## Fluxo de Criação de Pasta
 
-**Função**: Recebe SIPs do Mapoteca e publica no Kafka para processamento. Não interage diretamente com o Gestão de Dados.
-
-### 4. Microsserviço MinIO (TypeScript)
-**Direção**: MinIO ↔ Mapoteca
-
-**Função**: Gerencia armazenamento físico dos arquivos. Só pode ser acessado pelo Mapoteca, que coordena uploads, downloads e deleções físicas.
-
-## Modelo de Dados
-
-### AIP (Archival Information Package)
-- `id`: Identificador único interno
-- `transfer_id`: Identificador único do transfer
-- `creation_date`: Data de criação do registro
-
-### ArquivoOriginal
-- `nome`: Nome do arquivo original
-- `caminho_minio`: Caminho no storage MinIO
-- `checksum`: Hash de integridade (SHA256)
-- `formato`: Tipo MIME do arquivo
-
-### ArquivoPreservacao
-- `nome`: Nome do arquivo preservado
-- `caminho_minio`: Caminho no storage MinIO
-- `checksum`: Hash de integridade (SHA256)
-- `formato`: Tipo MIME do arquivo
-
+```
+    🚀 INÍCIO
+       │
+       ▼
+┌─────────────────┐
+│ 📝 Recebe dados │
+│ da nova pasta   │
+└─────────┬───────┘
+          │
+          ▼
+   🔍 Nome já existe
+      no mesmo pai?
+      ╱       ╲
+   Sim╱         ╲Não
+     ╱           ╲
+    ▼             ▼
+┌─────────────┐ ┌─────────────────┐
+│ ❌ Retorna  │ │ 💾 Cria pasta   │
+│   erro 409  │ │ no banco        │
+└─────────────┘ └─────────┬───────┘
+                          │
+                          ▼
+                       🏁 FIM
+```
 
 ## API Endpoints
 
-### POST /aips/
-Registra um novo AIP no sistema (chamado pelo Microsserviço de Processamento).
+### AIPs (Archival Information Packages)
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/aips` | Lista todos os AIPs |
+| `GET` | `/aips/{id}/details` | Detalhes de um AIP |
+| `GET` | `/aips/{id}/location` | Localização do arquivo |
+| `POST` | `/aips/` | Registra novo AIP |
+| `PUT` | `/aips/{id}/rename` | Renomeia AIP |
+| `POST` | `/aips/{id}/logical-delete` | Marca para deleção |
 
-**Status Code**: 201 Created
+### Pastas (Estrutura Hierárquica)
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/pastas/` | Lista todas as pastas |
+| `GET` | `/pastas/{id}` | Detalhes de uma pasta |
+| `POST` | `/pastas/` | Cria nova pasta |
+| `PUT` | `/pastas/{id}` | Renomeia pasta |
+| `DELETE` | `/pastas/{id}` | Deleta pasta e conteúdo |
 
-### GET /aips/{transfer_id}/location
-Retorna a localização de um arquivo para download (chamado pelo Mapoteca).
+## Modelo de Dados
 
-**Status Code**: 200 OK | 404 Not Found
+### AIP
+- `transfer_id`: Identificador único (PK)
+- `titulo`: Nome descritivo editável
+- `cod_pasta`: Referência à pasta (FK)
+- `creation_date`: Data de criação
+- `deleted_at`: Data de deleção lógica
 
-**Lógica de Priorização**:
-1. Primeiro, busca arquivos no bucket `preservacoes`
-2. Se não encontrar, busca no bucket `originais`
-3. Retorna erro 404 se nenhum arquivo for encontrado
+### Pasta
+- `cod_id`: Identificador único (PK)
+- `nom_pasta`: Nome da pasta
+- `cod_pai`: Referência à pasta pai (FK)
+- `creation_date`: Data de criação
 
-### DELETE /aips/{transfer_id}
-Marca um AIP como deletado logicamente (chamado pelo Mapoteca).
+### Arquivo (Original/Preservação)
+- `nome`: Nome sanitizado
+- `caminho_minio`: Path no MinIO
+- `checksum`: Hash SHA256
+- `formato`: Tipo do arquivo
+- `aip_id`: Referência ao AIP (FK)
 
-**Status Code**: 200 OK | 404 Not Found
+## Execução
 
-### PUT /aips/{transfer_id}/rename
-Atualiza o nome/metadados de um AIP (chamado pelo Mapoteca).
+```bash
+./start.sh
+```
 
-**Status Code**: 200 OK | 404 Not Found
+Inicia:
+- unoconv listener (porta 2002)
+- FastAPI server (porta 8000)
+- Redis worker (background)
 
-## Fluxos de Operação
+## Configuração
 
-### Fluxo de Upload (Ingestão)
-1. **Front-End** → **Mapoteca**: Envia SIP
-2. **Mapoteca** → **Ingestão**: Delega processamento inicial
-3. **Ingestão** → **Processamento**: Processa SIP → AIP
-4. **Processamento** → **Mapoteca**: Notifica sucesso do processamento
-5. **Processamento** → **Gestão de Dados**: Registra metadados do AIP
-6. **Mapoteca** → **MinIO**: Armazena AIP final
+```bash
+DATABASE_URL=postgresql://user:pass@localhost:5432/preservacao_db
+REDIS_URL=redis://localhost:6379/0
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+UNOCONV_HOST=localhost
+UNOCONV_PORT=2002
+```
 
-### Fluxo de Download
-1. **Front-End** → **Mapoteca**: Solicita download
-2. **Mapoteca** → **Gestão de Dados**: Consulta localização
-3. **Gestão de Dados**: Retorna metadados e caminho MinIO
-4. **Mapoteca** → **MinIO**: Recupera arquivo
-5. **Mapoteca** → **Front-End**: Entrega arquivo
+## Troubleshooting
 
-### Fluxo de Deleção
-1. **Front-End** → **Mapoteca**: Solicita deleção
-2. **Mapoteca** → **Gestão de Dados**: Deleção lógica (marca como deletado)
-3. **Gestão de Dados**: Retorna lista de objetos MinIO para exclusão
-4. **Mapoteca** → **MinIO**: Exclui arquivos físicos
-5. **Mapoteca** → **Gestão de Dados**: Confirma deleção física
-
-## Tratamento de Erros
-
-- **500 Internal Server Error**: Erro ao salvar no banco de dados
-- **404 Not Found**: AIP ou arquivos não encontrados
-- **Rollback automático**: Em caso de falha na transação
-
-## Logs e Monitoramento
-
-O serviço registra logs detalhados para:
-- Recebimento de novos AIPs
-- Sucesso/falha no salvamento
-- Consultas de localização
-- Erros e exceções
-
-## Considerações de Segurança
-
-- Validação de dados via Pydantic schemas
-- Transações de banco com rollback automático
-- Sanitização de parâmetros de entrada
-- Logs sem exposição de dados sensíveis
+| Problema | Solução |
+|----------|---------|
+| Worker não processa | Verificar `REDIS_URL` |
+| Conversão falha | Executar `unoconv --listener` |
+| Upload falha | Verificar credenciais MinIO |
+| API não responde | Verificar porta 8000 |

@@ -1,4 +1,9 @@
+# Em ../gestao-dados/requirements.txt
+
 fastapi
-uvicorn[standard]
-SQLAlchemy
+uvicorn
+sqlalchemy
 psycopg2-binary
+redis
+python-multipart
+requests

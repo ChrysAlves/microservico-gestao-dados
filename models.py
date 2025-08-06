@@ -1,42 +1,60 @@
+# Em ../gestao-dados/models.py
 
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship, declarative_base
 from datetime import datetime
+import uuid
 
 Base = declarative_base()
 
-class AIP(Base):
-    __tablename__ = "aips"
-    id = Column(Integer, primary_key=True, index=True)
-    transfer_id = Column(String, unique=True, index=True, nullable=False)
-    creation_date = Column(DateTime, default=datetime.utcnow)
-    deleted_at = Column(DateTime, nullable=True, default=None) 
-
+class TpPasta(Base):
+    __tablename__ = "tp_pastas"
+    cod_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    nom_pasta = Column(String, nullable=False)
+    cod_pai = Column(String, ForeignKey("tp_pastas.cod_id"), nullable=True)
     
-    arquivos_originais = relationship("ArquivoOriginal", back_populates="aip")
-    arquivos_preservacao = relationship("ArquivoPreservacao", back_populates="aip")
+    filhas = relationship("TpPasta", back_populates="pai")
+    pai = relationship("TpPasta", back_populates="filhas", remote_side=[cod_id])
+    aips = relationship("TpAip", back_populates="pasta")
 
-class ArquivoOriginal(Base):
-    __tablename__ = "arquivos_originais"
-    id = Column(Integer, primary_key=True, index=True)
-    aip_id = Column(Integer, ForeignKey("aips.id"))
-    nome = Column(String, nullable=False)
-    caminho_minio = Column(String, nullable=False)
-    checksum = Column(String, nullable=False)
-    algoritmo_checksum = Column(String, default="SHA256")
-    formato = Column(String, nullable=False)
+    __table_args__ = (
+        UniqueConstraint('nom_pasta', 'cod_pai', name='uq_pasta_pai_nome'),
+    )
+
+class TpAip(Base):
+    __tablename__ = "tp_aips"
     
-    aip = relationship("AIP", back_populates="arquivos_originais")
-
-class ArquivoPreservacao(Base):
-    __tablename__ = "arquivos_preservacao"
-    id = Column(Integer, primary_key=True, index=True)
-    aip_id = Column(Integer, ForeignKey("aips.id"))
-    nome = Column(String, nullable=False)
-    caminho_minio = Column(String, nullable=False)
-    checksum = Column(String, nullable=False)
-    algoritmo_checksum = Column(String, default="SHA256")
-    formato = Column(String, nullable=False)
+    cod_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    nom_titulo = Column(String, nullable=False)
+    nom_ra = Column(String, nullable=True)
     
-    aip = relationship("AIP", back_populates="arquivos_preservacao")
+    dhs_creation = Column(DateTime, default=datetime.utcnow)
+    dhs_deleted = Column(DateTime, nullable=True, default=None)
 
+    cod_pasta = Column(String, ForeignKey("tp_pastas.cod_id"), nullable=True)
+    pasta = relationship("TpPasta", back_populates="aips")
+
+    arquivos_originais = relationship("TpArquivoOriginal", back_populates="aip")
+    arquivos_preservacao = relationship("TpArquivoPreservacao", back_populates="aip")
+
+class TpArquivoOriginal(Base):
+    __tablename__ = "tp_arquivos_originais"
+    cod_original = Column(Integer, primary_key=True, index=True)
+    cod_aip = Column(String, ForeignKey("tp_aips.cod_id"))
+    nom_arquivo = Column(String, nullable=False)
+    dsc_caminho_minio = Column(String, nullable=False)
+    num_checksum = Column(String, nullable=False)
+    sig_formato = Column(String, nullable=False)
+    
+    aip = relationship("TpAip", back_populates="arquivos_originais")
+
+class TpArquivoPreservacao(Base):
+    __tablename__ = "tp_arquivos_preservacao"
+    cod_preservacao = Column(Integer, primary_key=True, index=True)
+    cod_aip = Column(String, ForeignKey("tp_aips.cod_id"))
+    nom_arquivo = Column(String, nullable=False)
+    dsc_caminho_minio = Column(String, nullable=False)
+    num_checksum = Column(String, nullable=False)
+    sig_formato = Column(String, nullable=False)
+    
+    aip = relationship("TpAip", back_populates="arquivos_preservacao")
